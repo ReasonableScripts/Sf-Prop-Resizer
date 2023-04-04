@@ -1,0 +1,199 @@
+--@name Prop Resizer
+--@author PurpleSleigh & Bonyoze
+--@shared
+
+
+
+if CLIENT then
+    
+    if player() == owner() then
+        print("left click to apply scale, right click to apply reversed scale")
+        print("")
+        print('"-x num" to set the scale for the x axis')
+        print('"-y num" to set the scale for the y axis')
+        print('"-z num" to set the scale for the z axis')
+        print("")
+        print('"-w num" to set the scale for all 3 axis')
+        print('"-r" to toggle scale reset, resets the scale of any entity it is applied to')
+    end
+else
+    
+    local scl = Vector(1)
+    
+    hook.add("PlayerSay","",function(ply,msg)
+        if ply ~= owner() then return end
+        
+        if string.sub(msg, 1, 3) == "-x " then
+            local num = tonumber(string.sub(msg, 4, #msg))
+            if num ~= nil then
+                scl[1] = num
+            end
+            return ""
+        end
+        if string.sub(msg, 1, 3) == "-y " then
+            local num = tonumber(string.sub(msg, 4, #msg))
+            if num ~= nil then
+                scl[2] = num
+            end
+            return ""
+        end
+        if string.sub(msg, 1, 3) == "-z " then
+            local num = tonumber(string.sub(msg, 4, #msg))
+            if num ~= nil then
+                scl[3] = num
+            end
+            return ""
+        end
+        if string.sub(msg, 1, 3) == "-w " then
+            local num = tonumber(string.sub(msg, 4, #msg))
+            if num ~= nil then
+                scl = Vector(num)
+            end
+            return ""
+        end
+        if string.sub(msg, 1, 2) == "-r" then
+            if reset then reset = false else reset = true end
+            return ""
+        end
+    end)
+    
+    function scaleEnt(ent, scale)
+        if isValid(ent:getPhysicsObject()) and prop.canSpawn() and scale ~= Vector(1) then
+            
+            local convexes, num
+            
+            if ent:getClass() == "starfall_prop" then
+                
+                num = scale * ent.vis:getScale()
+                
+                convexes = ent.base:getPhysicsObject():getMeshConvexes()
+                
+                if reset then
+                    ent.base:setPos(ent:getPos())
+                    ent.base:setAngles(ent:getAngles())
+                    ent.base:setFrozen(ent:isFrozen())
+                    ent.base:setPhysMaterial(ent:getPhysMaterial())
+                    ent.base:setNoDraw(false)
+                    ent.vis:remove()
+                    ent.base = nil
+                    ent:remove()
+                    print("Reset!")
+                end
+            else
+                convexes = ent:getPhysicsObject():getMeshConvexes()
+                
+                num = scale
+            end
+            
+            if not reset then
+                for k, v in ipairs(convexes) do
+                    local _, hull = mesh.findConvexHull(v)
+                    convexes[k] = hull
+                    for t, e in ipairs(hull) do
+                        convexes[k][t] = convexes[k][t] * num
+                    end
+                end
+                
+                local cProp = prop.createCustom(ent:getPos(), ent:getAngles(), convexes, ent:isFrozen())
+                
+                cProp:setPhysMaterial(ent:getPhysMaterial())
+                cProp:setHealth(ent:getHealth())
+                cProp:setColor( Color(255,255,255,0) )
+                
+                local mass = Vector( ent:getMass() / 3 ) * scale
+                
+                cProp:setMass( mass[1]+mass[2]+mass[3] )
+                
+                if ent:getClass() == "starfall_prop" then
+                    if isValid(ent.base) then
+                        (ent.base).p = cProp
+                    end
+                    
+                    cProp.base = ent.base
+                    
+                    cProp.vis = hologram.create(cProp:getPos(), cProp:getAngles(), ent.vis:getModel(), scale * ent.vis:getScale())
+                    cProp.vis:setColor(ent.vis:getColor())
+                    
+                    ent.base = nil
+                    ent:remove()
+                else
+                    ent.p = cProp
+                    
+                    cProp.base = ent
+                    
+                    ent:setPos(Vector())
+                    ent:setFrozen(true)
+                    ent:setNoDraw(true)
+                    
+                    cProp.vis = hologram.create(cProp:getPos(), cProp:getAngles(), ent:getModel(), scale)
+                    cProp.vis:setColor(ent:getColor())
+                end
+                
+                cProp.vis:setPos(cProp:getPos())
+                cProp.vis:setAngles(cProp:getAngles())
+                cProp.vis:setParent(cProp)
+                cProp.vis:setMaterial(ent:getMaterial())
+                
+                net.start("holo")
+                net.writeEntity((cProp))
+                net.writeVector((cProp.vis):getScale())
+                net.send(nil,true)
+            else
+                reset = false
+            end
+        end 
+    end
+    
+    hook.add("EntityRemoved", "", function(ent)
+        if ent.base ~= nil then
+            if isValid(ent.base) then
+                ent.base:remove()
+            end
+        end
+        if ent.p ~= nil then
+            if isValid(ent.p) then
+                ent.p:remove()
+            end
+        end
+    end)
+    
+    hook.add("KeyPress", "", function(ply, key)
+        if ply ~= owner() or chip():getQuotaAverage() > chip():getQuotaMax()*0.4 then return end
+        
+        if owner():getActiveWeapon():getToolMode() == "inflator" then
+            local line = owner():getEyeTrace()
+            
+            if isValid(line.Entity) then
+                if hasPermission("entities.setPos", line.Entity) and line.Entity:getOwner() ~= nil then
+                    local res, res2 = pcall( function()
+                        if key == 2048 then
+                            scaleEnt(line.Entity, scl / ( scl * scl ))
+                        elseif key == 1 then
+                            scaleEnt(line.Entity, scl)
+                        end
+                    end)
+                    
+                    //All vertices are too close to each other
+                    if res2 ~= nil then
+                        if res2.message ~= nil then
+                            //print(res2.message)
+                            
+                            local small = string.find(res2.message, "No two vertices can have a distance less than", 1, nil)
+                            local big = string.find(res2.message, "The custom prop cannot exceed a hull size of", 1, nil)
+                            local close = string.find(res2.message, "All vertices are too close to each other", 1, nil)
+                            
+                            if small ~= nil then
+                                print("Smaller than server limit")
+                            elseif big ~= nil then
+                                print("Bigger than server limit")
+                            elseif close ~= nil then
+                                print("Mesh vertices too compact to follow server limits, this mesh is unusable")
+                            end
+                        end
+                    end
+                    
+                end
+            end
+        end
+    end)
+end
